@@ -69,11 +69,18 @@ jobs:
             cd nogui && make build-arm64 && cd .. && mv nogui/build/updater ${{env.BUILD_DIR}}/linux-arm64/updater
             sha512sum ${{env.BUILD_DIR}}/linux-arm64/updater | cut -d ' ' -f 1 > ${{env.BUILD_DIR}}/linux-arm64/checksum.txt
 
+        - name: Compress directories
+          run: |
+            tar -czf ${{env.BUILD_DIR}}/linux-x64.tar.gz -C ${{env.BUILD_DIR}} linux-x64
+            tar -czf ${{env.BUILD_DIR}}/linux-arm64.tar.gz -C ${{env.BUILD_DIR}} linux-arm64
+
         - name: Upload artifact
           uses: actions/upload-artifact@v3
           with:
             name: updater-linux
-            path: ${{env.BUILD_DIR}}/*
+            path: |
+              ${{env.BUILD_DIR}}/linux-x64.tar.gz
+              ${{env.BUILD_DIR}}/linux-arm64.tar.gz
 
   windows:
     runs-on: windows-latest
@@ -114,11 +121,18 @@ jobs:
             cd nogui && make build-arm64 && cd .. && mv nogui/build/updater.exe ${{env.BUILD_DIR}}/windows-arm64/updater.exe
             sha512sum ${{env.BUILD_DIR}}/windows-arm64/updater.exe | cut -d ' ' -f 1 > ${{env.BUILD_DIR}}/windows-arm64/checksum.txt
 
+        - name: Compress directories
+          run: |
+            tar -czf ${{env.BUILD_DIR}}/windows-x64.tar.gz -C ${{env.BUILD_DIR}} windows-x64
+            tar -czf ${{env.BUILD_DIR}}/windows-arm64.tar.gz -C ${{env.BUILD_DIR}} windows-arm64
+
         - name: Upload artifact
           uses: actions/upload-artifact@v3
           with:
             name: updater-windows
-            path: ${{env.BUILD_DIR}}/*
+            path: |
+              ${{env.BUILD_DIR}}/windows-x64.tar.gz
+              ${{env.BUILD_DIR}}/windows-arm64.tar.gz
 
   publish_release:
     name: Publish Release
@@ -126,7 +140,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      PATH_TO_ASSETS: assets
+      PATH_TO_ARTIFACTS: artifacts
 
     needs: [linux, windows]
 
@@ -145,13 +159,13 @@ jobs:
           uses: actions/download-artifact@v3
           with:
             name: updater-linux
-            path: ./${{env.PATH_TO_ASSETS}}
+            path: ./${{env.PATH_TO_ARTIFACTS}}
 
         - name: Download Windows artifacts
           uses: actions/download-artifact@v3
           with:
             name: updater-windows
-            path: ./${{env.PATH_TO_ASSETS}}
+            path: ./${{env.PATH_TO_ARTIFACTS}}
 
         - name: Create Release
           if: ${{ startsWith(github.ref, 'refs/heads/main') }}
@@ -159,4 +173,4 @@ jobs:
           with:
             token: ${{ secrets.GH_TOKEN }}
             tag_name: ${{env.UPDATER_VERSION}}
-            files: ${{env.PATH_TO_ASSETS}}/*
+            files: ${{env.PATH_TO_ARTIFACTS}}/*
