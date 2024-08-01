@@ -1,0 +1,157 @@
+name: Build
+
+on:
+    push:
+      branches:
+        - 'main'
+      paths-ignore:
+        - 'README.md'
+        - 'gui/.gitignore'
+        - 'nogui/.gitignore'
+    pull_request:
+      branches:
+        - 'main'
+      paths-ignore:
+        - 'README.md'
+        - 'gui/.gitignore'
+        - 'nogui/.gitignore'
+
+env:
+    APP_INFO_FILE: info.env
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+
+    env:
+        BUILD_DIR: build
+
+    steps:
+        - name: Check out Git repository
+          uses: actions/checkout@v3
+
+        - name: Setup Go 1.21.x
+          uses: actions/setup-go@v4
+          with:
+            go-version: '1.21.x'
+  
+        - name: Set up Python 3.10
+          uses: actions/setup-python@v4
+          with:
+            python-version: '3.10'
+
+        - name: Install dependencies
+          run: |
+            sudo apt-get update && sudo apt-get upgrade -y
+            sudo apt-get -y install \
+            libxcb-icccm4 \
+            libxcb-render-util0 \
+            libxkbcommon-x11-0 \
+            libxcb-image0 \
+            libxcb-cursor0 \
+            libxcb-shape0 \
+            libxcb-xkb1 \
+            libxcb-keysyms1 \
+            libgl1-mesa-glx
+            cd gui && make install && cd ..
+        
+        - name: Run build
+          shell: bash
+          run: |
+            mkdir -p ${{env.BUILD_DIR}}
+
+            cd ${{env.BUILD_DIR}} && mkdir linux-x64 && cd ..
+            cd ${{env.BUILD_DIR}} && mkdir linux-arm64 && cd ..
+
+            cd gui && make build && cd .. && mv gui/dist/updater ${{env.BUILD_DIR}}/linux-x64/updater
+            sha512sum ${{env.BUILD_DIR}}/linux-x64/updater | cut -d ' ' -f 1 > ${{env.BUILD_DIR}}/linux-x64/checksum.txt
+
+            cd nogui && make build-arm64 && cd .. && mv nogui/build/updater ${{env.BUILD_DIR}}/linux-arm64/updater
+            sha512sum ${{env.BUILD_DIR}}/linux-arm64/updater | cut -d ' ' -f 1 > ${{env.BUILD_DIR}}/linux-arm64/checksum.txt
+
+        - name: Upload artifact
+          uses: actions/upload-artifact@v3
+          with:
+            name: updater-linux
+            path: ${{env.BUILD_DIR}}/*
+
+  windows:
+    runs-on: windows-latest
+
+    env:
+        BUILD_DIR: build
+
+    steps:
+        - name: Check out Git repository
+          uses: actions/checkout@v3
+
+        - name: Setup Go 1.21.x
+          uses: actions/setup-go@v4
+          with:
+            go-version: '1.21.x'
+  
+        - name: Set up Python 3.10
+          uses: actions/setup-python@v4
+          with:
+            python-version: '3.10'
+
+        - name: Run build
+          shell: bash
+          run: |
+            mkdir -p ${{env.BUILD_DIR}}
+
+            cd ${{env.BUILD_DIR}} && mkdir windows-x64 && cd ..
+            cd ${{env.BUILD_DIR}} && mkdir windows-arm64 && cd ..
+
+            cd gui && make build && cd .. && mv gui/dist/updater.exe ${{env.BUILD_DIR}}/windows-x64/updater.exe
+            sha512sum ${{env.BUILD_DIR}}/windows-x64/updater.exe | cut -d ' ' -f 1 > ${{env.BUILD_DIR}}/windows-x64/checksum.txt
+
+            cd nogui && make build-arm64 && cd .. && mv nogui/build/updater.exe ${{env.BUILD_DIR}}/windows-arm64/updater.exe
+            sha512sum ${{env.BUILD_DIR}}/windows-arm64/updater.exe | cut -d ' ' -f 1 > ${{env.BUILD_DIR}}/windows-arm64/checksum.txt
+
+        - name: Upload artifact
+          uses: actions/upload-artifact@v3
+          with:
+            name: updater-windows
+            path: ${{env.BUILD_DIR}}/*
+
+  publish_release:
+    name: Publish Release
+
+    runs-on: ubuntu-latest
+
+    env:
+      PATH_TO_ASSETS: assets
+
+    needs: [linux, windows]
+
+    steps:
+        - name: Check out Git repository
+          uses: actions/checkout@v3
+
+        - name: Load variables from the info.env file
+          shell: bash
+          run: |
+            source ${{env.APP_INFO_FILE}}
+            echo "UPDATER_NAME=$UPDATER_NAME" >> $GITHUB_ENV
+            echo "UPDATER_VERSION=$UPDATER_VERSION" >> $GITHUB_ENV
+
+        - name: Download Linux artifacts
+          uses: actions/download-artifact@v3
+          with:
+            name: updater-linux
+            path: ./${{env.PATH_TO_ASSETS}}
+
+        - name: Download Windows artifacts
+          uses: actions/download-artifact@v3
+          with:
+            name: updater-windows
+            path: ./${{env.PATH_TO_ASSETS}}
+
+        - name: Create Release
+          if: ${{ startsWith(github.ref, 'refs/heads/main') }}
+          uses: softprops/action-gh-release@v2
+          with:
+            token: ${{ secrets.GH_TOKEN }}
+            tag_name: ${{env.UPDATER_VERSION}}
+            files: ${{env.PATH_TO_ASSETS}}/*
